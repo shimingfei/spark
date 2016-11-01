@@ -65,7 +65,7 @@ class TaskContextSuite extends SparkFunSuite with BeforeAndAfter with LocalSpark
       0, 0, taskBinary, rdd.partitions(0), Seq.empty, 0, new Properties,
       closureSerializer.serialize(TaskMetrics.registered).array())
     intercept[RuntimeException] {
-      task.run(0, 0, null)
+      task.run(0, 0, null, 0)
     }
     assert(TaskContextSuite.completed === true)
   }
@@ -87,7 +87,7 @@ class TaskContextSuite extends SparkFunSuite with BeforeAndAfter with LocalSpark
       0, 0, taskBinary, rdd.partitions(0), Seq.empty, 0, new Properties,
       closureSerializer.serialize(TaskMetrics.registered).array())
     intercept[RuntimeException] {
-      task.run(0, 0, null)
+      task.run(0, 0, null, 0)
     }
     assert(TaskContextSuite.lastError.getMessage == "damn error")
   }
@@ -184,6 +184,7 @@ class TaskContextSuite extends SparkFunSuite with BeforeAndAfter with LocalSpark
         taskMetrics)
       taskMetrics.registerAccumulator(acc1)
       taskMetrics.registerAccumulator(acc2)
+      override def prepTask(): Unit = {}
       override def runTask(tc: TaskContext): Int = 0
     }
     // First, simulate task success. This should give us all the accumulators.
@@ -206,6 +207,7 @@ class TaskContextSuite extends SparkFunSuite with BeforeAndAfter with LocalSpark
         SparkEnv.get.metricsSystem,
         taskMetrics)
       taskMetrics.incMemoryBytesSpilled(10)
+      override def prepTask(): Unit = {}
       override def runTask(tc: TaskContext): Int = 0
     }
     val updatedAccums = task.collectAccumulatorUpdates()

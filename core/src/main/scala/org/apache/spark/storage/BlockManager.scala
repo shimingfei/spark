@@ -39,6 +39,7 @@ import org.apache.spark.network.netty.SparkTransportConf
 import org.apache.spark.network.shuffle.ExternalShuffleClient
 import org.apache.spark.network.shuffle.protocol.ExecutorShuffleInfo
 import org.apache.spark.rpc.RpcEnv
+import org.apache.spark.scheduler.MapStatus
 import org.apache.spark.serializer.{SerializerInstance, SerializerManager}
 import org.apache.spark.shuffle.ShuffleManager
 import org.apache.spark.storage.memory._
@@ -51,6 +52,8 @@ private[spark] class BlockResult(
     val data: Iterator[Any],
     val readMethod: DataReadMethod.Value,
     val bytes: Long)
+
+private[spark] case class BlockCallback(blockId: BlockId, callback: Unit => Unit)
 
 /**
  * Abstracts away how blocks are stored and provides different ways to read the underlying block
@@ -1483,6 +1486,10 @@ private[spark] class BlockManager(
       taskAttemptId: Option[Long] = None): Unit = {
     releaseLock(blockId, taskAttemptId)
     data.dispose()
+  }
+
+  def mapOutputReady(shuffleId: Int, mapId: Int, numReduces: Int, mapStatus: MapStatus) {
+    SparkEnv.get.futureTaskWaiter.addMapStatusAvailable(shuffleId, mapId, numReduces, mapStatus)
   }
 
   def stop(): Unit = {

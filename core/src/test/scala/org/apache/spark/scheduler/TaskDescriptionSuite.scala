@@ -62,6 +62,7 @@ class TaskDescriptionSuite extends SparkFunSuite {
       executorId = "testExecutor",
       name = "task for test",
       index = 19,
+      isFutureTask = false,
       originalFiles,
       originalJars,
       originalProperties,

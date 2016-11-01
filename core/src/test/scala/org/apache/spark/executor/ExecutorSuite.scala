@@ -43,14 +43,16 @@ import org.apache.spark.rpc.RpcEnv
 import org.apache.spark.scheduler.{FakeTask, ResultTask, TaskDescription}
 import org.apache.spark.serializer.JavaSerializer
 import org.apache.spark.shuffle.FetchFailedException
-import org.apache.spark.storage.BlockManagerId
+import org.apache.spark.storage.{BlockManager, BlockManagerId}
 import org.apache.spark.util.UninterruptibleThread
+import org.apache.spark.storage.BlockManager
 
 class ExecutorSuite extends SparkFunSuite with LocalSparkContext with MockitoSugar with Eventually {
 
   test("SPARK-15963: Catch `TaskKilledException` correctly in Executor.TaskRunner") {
     // mock some objects to make Executor.launchTask() happy
     val conf = new SparkConf
+    sc = new SparkContext("local", "test")
     val serializer = new JavaSerializer(conf)
     val env = createMockEnv(conf, serializer)
     val serializedTask = serializer.newInstance().serialize(new FakeTask(0, 0))
@@ -67,8 +69,7 @@ class ExecutorSuite extends SparkFunSuite with LocalSparkContext with MockitoSug
     // | executor.killAllTasks(true) |                                       |
     // |                             |          ...                          |
     // |                             |  task = ser.deserialize               |
-    // |                             |          ...                          |
-    // |                             | execBackend.statusUpdate  // 2nd time |
+    // |                             |          ...                          | // |                             | execBackend.statusUpdate  // 2nd time |
     // |                             |          ...                          |
     // |                             |   TaskRunner.run() ends               |
     // |       check results         |                                       |
@@ -83,9 +84,9 @@ class ExecutorSuite extends SparkFunSuite with LocalSparkContext with MockitoSug
         override def answer(invocationOnMock: InvocationOnMock): Unit = {
           if (firstTime) {
             executorSuiteHelper.latch1.countDown()
+            firstTime = false
             // here between latch1 and latch2, executor.killAllTasks() is called
             executorSuiteHelper.latch2.await()
-            firstTime = false
           }
           else {
             // save the returned `taskState` and `testFailedReason` into `executorSuiteHelper`
@@ -102,7 +103,7 @@ class ExecutorSuite extends SparkFunSuite with LocalSparkContext with MockitoSug
 
     var executor: Executor = null
     try {
-      executor = new Executor("id", "localhost", env, userClassPath = Nil, isLocal = true)
+      executor = new Executor("id", "localhost", env, 1, userClassPath = Nil, isLocal = true)
       // the task will be launched in a dedicated worker thread
       executor.launchTask(mockExecutorBackend, taskDescription)
 
@@ -248,6 +249,7 @@ class ExecutorSuite extends SparkFunSuite with LocalSparkContext with MockitoSug
       executorId = "",
       name = "",
       index = 0,
+      isFutureTask = false,
       addedFiles = Map[String, Long](),
       addedJars = Map[String, Long](),
       properties = new Properties,
@@ -264,8 +266,8 @@ class ExecutorSuite extends SparkFunSuite with LocalSparkContext with MockitoSug
     val mockUncaughtExceptionHandler = mock[UncaughtExceptionHandler]
     var executor: Executor = null
     try {
-      executor = new Executor("id", "localhost", SparkEnv.get, userClassPath = Nil, isLocal = true,
-        uncaughtExceptionHandler = mockUncaughtExceptionHandler)
+      executor = new Executor("id", "localhost", SparkEnv.get, 1, userClassPath = Nil,
+        isLocal = true, uncaughtExceptionHandler = mockUncaughtExceptionHandler)
       // the task will be launched in a dedicated worker thread
       executor.launchTask(mockBackend, taskDescription)
       eventually(timeout(5.seconds), interval(10.milliseconds)) {

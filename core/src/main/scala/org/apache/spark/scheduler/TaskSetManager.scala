@@ -493,7 +493,7 @@ private[spark] class TaskSetManager(
         // val timeTaken = clock.getTime() - startTime
         val taskName = s"task ${info.id} in stage ${taskSet.id}"
         logInfo(s"Starting $taskName (TID $taskId, $host, executor ${info.executorId}, " +
-          s"partition ${task.partitionId}, $taskLocality, ${serializedTask.limit} bytes)")
+          s"partition ${task.partitionId}, $taskLocality)")
 
         sched.dagScheduler.taskStarted(task, info)
         new TaskDescription(
@@ -502,6 +502,7 @@ private[spark] class TaskSetManager(
           execId,
           taskName,
           index,
+          task.isFutureTask,
           sched.sc.addedFiles,
           sched.sc.addedJars,
           task.localProperties,
@@ -824,6 +825,17 @@ private[spark] class TaskSetManager(
         None
     }
 
+    // Mark futures tasks as zombie and ask DAGScheduler to retry them
+    // once their parent stage finishes
+    if (taskSet.isFutureTask) {
+      if (!successful(index)) {
+        successful(index) = true
+        tasksSuccessful += 1
+      }
+      // Not adding to failed executors for FetchFailed.
+      isZombie = true
+    }
+
     sched.dagScheduler.taskEnded(tasks(index), reason, null, accumUpdates, info)
 
     if (successful(index)) {
@@ -895,8 +907,8 @@ private[spark] class TaskSetManager(
     // and we are not using an external shuffle server which could serve the shuffle outputs.
     // The reason is the next stage wouldn't be able to fetch the data from this dead executor
     // so we would need to rerun these tasks on other executors.
-    if (tasks(0).isInstanceOf[ShuffleMapTask] && !env.blockManager.externalShuffleServiceEnabled
-        && !isZombie) {
+    if ((tasks(0).isInstanceOf[ShuffleMapTask] || tasks(0).isInstanceOf[BatchShuffleMapTask]) &&
+         !env.blockManager.externalShuffleServiceEnabled && !isZombie) {
       for ((tid, info) <- taskInfos if info.executorId == execId) {
         val index = taskInfos(tid).index
         if (successful(index)) {

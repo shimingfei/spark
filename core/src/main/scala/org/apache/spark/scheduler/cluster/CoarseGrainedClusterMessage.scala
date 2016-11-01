@@ -19,6 +19,8 @@ package org.apache.spark.scheduler.cluster
 
 import java.nio.ByteBuffer
 
+import scala.collection.mutable.ArrayBuffer
+
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.rpc.RpcEndpointRef
 import org.apache.spark.scheduler.ExecutorLossReason
@@ -43,8 +45,9 @@ private[spark] object CoarseGrainedClusterMessages {
   case class KillTask(taskId: Long, executor: String, interruptThread: Boolean, reason: String)
     extends CoarseGrainedClusterMessage
 
-  case class KillExecutorsOnHost(host: String)
-    extends CoarseGrainedClusterMessage
+  case class LaunchTasks(data: Seq[SerializableBuffer]) extends CoarseGrainedClusterMessage
+
+  case class KillExecutorsOnHost(host: String) extends CoarseGrainedClusterMessage
 
   sealed trait RegisterExecutorResponse
 

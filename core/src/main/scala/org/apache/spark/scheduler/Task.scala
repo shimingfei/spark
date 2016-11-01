@@ -20,11 +20,16 @@ package org.apache.spark.scheduler
 import java.nio.ByteBuffer
 import java.util.Properties
 
+import scala.collection.mutable
+import scala.collection.mutable.{HashMap, HashSet, Stack}
+
 import org.apache.spark._
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.internal.config.APP_CALLER_CONTEXT
 import org.apache.spark.memory.{MemoryMode, TaskMemoryManager}
 import org.apache.spark.metrics.MetricsSystem
+import org.apache.spark.rdd.RDD
+import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util._
 
 /**
@@ -58,6 +63,9 @@ private[spark] abstract class Task[T](
     // The default value is only used in tests.
     serializedTaskMetrics: Array[Byte] =
       SparkEnv.get.closureSerializer.newInstance().serialize(TaskMetrics.registered).array(),
+    val isFutureTask: Boolean = false,
+    val depShuffleIds: Option[Seq[Seq[Int]]] = None,
+    val depShuffleNumMaps: Option[Seq[Int]] = None,
     val jobId: Option[Int] = None,
     val appId: Option[String] = None,
     val appAttemptId: Option[String] = None) extends Serializable {
@@ -75,17 +83,25 @@ private[spark] abstract class Task[T](
   final def run(
       taskAttemptId: Long,
       attemptNumber: Int,
-      metricsSystem: MetricsSystem): T = {
-    SparkEnv.get.blockManager.registerTask(taskAttemptId)
-    context = new TaskContextImpl(
-      stageId,
-      partitionId,
-      taskAttemptId,
-      attemptNumber,
-      taskMemoryManager,
-      localProperties,
-      metricsSystem,
-      metrics)
+      metricsSystem: MetricsSystem,
+      batchId: Int): T = {
+    if (context == null) {
+      SparkEnv.get.blockManager.registerTask(taskAttemptId)
+      context = new TaskContextImpl(
+        stageId,
+        partitionId,
+        taskAttemptId,
+        attemptNumber,
+        taskMemoryManager,
+        localProperties,
+        metricsSystem,
+        metrics,
+        batchId)
+    }
+    if (context._taskMemoryManager == null) {
+      context._taskMemoryManager = taskMemoryManager
+    }
+
     TaskContext.setTaskContext(context)
     taskThread = Thread.currentThread()
 
@@ -146,21 +162,60 @@ private[spark] abstract class Task[T](
     }
   }
 
-  private var taskMemoryManager: TaskMemoryManager = _
+  def prepTaskWithContext(
+      taskAttemptId: Long,
+      attemptNumber: Int,
+      metricsSystem: MetricsSystem): Unit = {
 
-  def setTaskMemoryManager(taskMemoryManager: TaskMemoryManager): Unit = {
-    this.taskMemoryManager = taskMemoryManager
+    SparkEnv.get.blockManager.registerTask(taskAttemptId)
+    context = new TaskContextImpl(
+      stageId,
+      partitionId,
+      taskAttemptId,
+      attemptNumber,
+      taskMemoryManager,
+      localProperties,
+      metricsSystem,
+      metrics)
+
+    TaskContext.setTaskContext(context)
+    taskThread = Thread.currentThread()
+    if (_reasonIfKilled != null) {
+      kill(interruptThread = false, _reasonIfKilled)
+    }
+    try {
+      prepTask()
+    } catch {
+      case e: Throwable =>
+        // Catch all errors; run task failure callbacks, and rethrow the exception.
+        try {
+          context.markTaskFailed(e)
+        } catch {
+          case t: Throwable =>
+            e.addSuppressed(t)
+        }
+        throw e
+    }
   }
 
-  def runTask(context: TaskContext): T
-
-  def preferredLocations: Seq[TaskLocation] = Nil
 
   // Map output tracker epoch. Will be set by TaskSetManager.
   var epoch: Long = -1
 
   // Task context, to be initialized in run().
   @transient var context: TaskContextImpl = _
+
+  private var taskMemoryManager: TaskMemoryManager = _
+
+  def setTaskMemoryManager(taskMemoryManager: TaskMemoryManager): Unit = {
+    this.taskMemoryManager = taskMemoryManager
+  }
+
+  def prepTask(): Unit
+
+  def runTask(context: TaskContext): T
+
+  def preferredLocations: Seq[TaskLocation] = Nil
 
   // The actual Thread on which the task is running, if any. Initialized in run().
   @volatile @transient private var taskThread: Thread = _

@@ -57,7 +57,7 @@ private[spark] class LocalEndpoint(
   val localExecutorHostname = "localhost"
 
   private val executor = new Executor(
-    localExecutorId, localExecutorHostname, SparkEnv.get, userClassPath, isLocal = true)
+    localExecutorId, localExecutorHostname, SparkEnv.get, totalCores, userClassPath, isLocal = true)
 
   override def receive: PartialFunction[Any, Unit] = {
     case ReviveOffers =>
