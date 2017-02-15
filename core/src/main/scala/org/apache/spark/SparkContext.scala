@@ -2163,7 +2163,7 @@ class SparkContext(config: SparkConf) extends Logging {
     val cleanedFuncs = new HashMap[Int, Iterator[T] => U]
     val resultJobs = (0 until rdds.size).map { i =>
       if (!cleanedFuncs.contains(funcs(i).hashCode)) {
-        cleanedFuncs.put(funcs(i).hashCode, funcs(i))
+        cleanedFuncs.put(funcs(i).hashCode, clean(funcs(i)))
       }
       val cleanF = cleanedFuncs(funcs(i).hashCode)
       val results = new Array[U](rdds(i).partitions.length)
