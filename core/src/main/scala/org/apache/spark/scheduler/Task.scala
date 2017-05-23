@@ -20,16 +20,11 @@ package org.apache.spark.scheduler
 import java.nio.ByteBuffer
 import java.util.Properties
 
-import scala.collection.mutable
-import scala.collection.mutable.{HashMap, HashSet, Stack}
-
 import org.apache.spark._
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.internal.config.APP_CALLER_CONTEXT
 import org.apache.spark.memory.{MemoryMode, TaskMemoryManager}
 import org.apache.spark.metrics.MetricsSystem
-import org.apache.spark.rdd.RDD
-import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util._
 
 /**
@@ -61,7 +56,7 @@ private[spark] abstract class Task[T](
     val partitionId: Int,
     @transient var localProperties: Properties = new Properties,
     // The default value is only used in tests.
-    serializedTaskMetrics: Array[Byte] =
+    val serializedTaskMetrics: Array[Byte] =
       SparkEnv.get.closureSerializer.newInstance().serialize(TaskMetrics.registered).array(),
     val isFutureTask: Boolean = false,
     val depShuffleIds: Option[Seq[Seq[Int]]] = None,

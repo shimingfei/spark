@@ -346,6 +346,8 @@ private[spark] class Executor(
 
     private var taskStart: Long = _
 
+    private val threadMXBean = ManagementFactory.getThreadMXBean
+
     private val ser = env.closureSerializer.newInstance()
 
     def kill(interruptThread: Boolean, reason: String): Unit = {
@@ -482,7 +484,13 @@ private[spark] class Executor(
 
     // Deserializes the task and stores it in the `task` variable.
     private def deserializeTask(): Unit = {
+      threadId = Thread.currentThread.getId
+      Thread.currentThread.setName(threadName)
       val deserializeStartTime = System.currentTimeMillis()
+      val deserializeStartCpuTime = if (threadMXBean.isCurrentThreadCpuTimeSupported) {
+        threadMXBean.getCurrentThreadCpuTime
+      } else 0L
+      Thread.currentThread.setContextClassLoader(replClassLoader)
 
       // Must be set before updateDependencies() is called, in case fetching dependencies
       // requires access to properties contained within (e.g. for access control).
@@ -495,18 +503,21 @@ private[spark] class Executor(
 
       // If this task has been killed before we deserialized it, let's quit now. Otherwise,
       // continue executing the task.
-      if (reasonIfKilled.isDefined) {
+      val killReason = reasonIfKilled
+      if (killReason.isDefined) {
         // Throw an exception rather than returning, because returning within a try{} block
         // causes a NonLocalReturnControl exception to be thrown. The NonLocalReturnControl
         // exception will be caught by the catch block, leading to an incorrect ExceptionFailure
         // for the task.
-        throw new TaskKilledException(reasonIfKilled.get)
+        throw new TaskKilledException(killReason.get)
       }
 
       task.prepTaskWithContext(taskId, taskDescription.attemptNumber, env.metricsSystem)
       val deserializeStopTime = System.currentTimeMillis()
       logInfo(s"Deserializing Task ${taskId} took " + (deserializeStopTime - deserializeStartTime))
       task.metrics.setExecutorDeserializeTime(deserializeStopTime - deserializeStartTime)
+      task.metrics.setExecutorDeserializeCpuTime(
+        (deserializeStopTime - deserializeStartCpuTime) + task.executorDeserializeCpuTime)
     }
 
     private def runDeserializedTask(): Unit = {
@@ -523,6 +534,9 @@ private[spark] class Executor(
 
       // Run the actual task and measure its runtime.
       taskStart = System.currentTimeMillis()
+      val taskStartCpu = if (threadMXBean.isCurrentThreadCpuTimeSupported) {
+        threadMXBean.getCurrentThreadCpuTime
+      } else 0L
       var threwException = true
       val value = task.run(
         taskAttemptId = taskId,
@@ -530,7 +544,18 @@ private[spark] class Executor(
         metricsSystem = env.metricsSystem,
         batchId = lastExecutedBatch)
       threwException = false
+      task.context.fetchFailed.foreach { fetchFailure =>
+        // uh-oh.  it appears the user code has caught the fetch-failure without throwing any
+        // other exceptions.  Its *possible* this is what the user meant to do (though highly
+        // unlikely).  So we will log an error and keep going.
+        logError(s"TID ${taskId} completed successfully though internally it encountered " +
+          s"unrecoverable fetch failures!  Most likely this means user code is incorrectly " +
+          s"swallowing Spark's internal ${classOf[FetchFailedException]}", fetchFailure)
+      }
       val taskFinish = System.currentTimeMillis()
+      val taskFinishCpu = if (threadMXBean.isCurrentThreadCpuTimeSupported) {
+        threadMXBean.getCurrentThreadCpuTime
+      } else 0L
       logInfo(s"Finished running $taskName (TID $taskId) took ${taskFinish-taskStart}")
 
       // If the task has been killed, let's fail it.
@@ -539,12 +564,14 @@ private[spark] class Executor(
       if (numBatches > 0) {
         batchResults(lastExecutedBatch) = value
         batchTask.metrics.incExecutorRunTime((taskFinish - taskStart))
+        batchTask.metrics.incExecutorCpuTime(taskFinishCpu - taskStartCpu)
         batchTask.metrics.incJvmGCTime(computeTotalGcTime() - startGCTime)
         val y = task.metrics.shuffleReadMetrics
         logInfo(s"TID $taskId, st ${task.stageId}, b $lastExecutedBatch, fw ${y.fetchWaitTime}")
       } else {
         task.metrics.incExecutorRunTime((taskFinish - taskStart))
         task.metrics.incJvmGCTime(computeTotalGcTime() - startGCTime)
+        task.metrics.incExecutorCpuTime(taskFinishCpu - taskStartCpu)
       }
 
       if (numBatches == 0 || (lastExecutedBatch == numBatches - 1)) {
@@ -681,12 +708,13 @@ private[spark] class Executor(
           }
           logInfo(s"Running $taskName (TID $taskId)")
 
-          if (reasonIfKilled.isDefined) {
+          val killReason = reasonIfKilled
+          if (killReason.isDefined) {
             // Throw an exception rather than returning, because returning within a try{} block
             // causes a NonLocalReturnControl exception to be thrown. The NonLocalReturnControl
             // exception will be caught by the catch block, leading to an incorrect ExceptionFailure
             // for the task.
-            throw new TaskKilledException(reasonIfKilled.get)
+            throw new TaskKilledException(killReason.get)
           }
 
           runDeserializedTask()
@@ -742,6 +770,7 @@ private[spark] class Executor(
       val startTimeMs = System.currentTimeMillis()
       def elapsedTimeMs = System.currentTimeMillis() - startTimeMs
       def timeoutExceeded(): Boolean = killTimeoutMs > 0 && elapsedTimeMs > killTimeoutMs
+
       try {
         // Only attempt to kill the task once. If interruptThread = false then a second kill
         // attempt would be a no-op and if interruptThread = true then it may not be safe or

@@ -1690,6 +1690,27 @@ class DAGScheduler(
             if (!mapStage.isAvailable) {
               failedStages += mapStage
             }
+            if (noResubmitEnqueued) {
+              // We expect one executor failure to trigger many FetchFailures in rapid succession,
+              // but all of those task failures can typically be handled by a single resubmission of
+              // the failed stage.  We avoid flooding the scheduler's event queue with resubmit
+              // messages by checking whether a resubmit is already in the event queue for the
+              // failed stage.  If there is already a resubmit enqueued for a different failed
+              // stage, that event would also be sufficient to handle the current failed stage, but
+              // producing a resubmit for each failed stage makes debugging and logging a little
+              // simpler while not producing an overwhelming number of scheduler events.
+              logInfo(
+                s"Resubmitting $mapStage (${mapStage.name}) and " +
+                s"$failedStage (${failedStage.name}) due to fetch failure"
+              )
+              messageScheduler.schedule(
+                new Runnable {
+                  override def run(): Unit = eventProcessLoop.post(ResubmitFailedStages)
+                },
+                DAGScheduler.RESUBMIT_TIMEOUT,
+                TimeUnit.MILLISECONDS
+              )
+            }
           }
           // Mark the map whose fetch failed as broken in the map stage
           if (mapId != -1) {

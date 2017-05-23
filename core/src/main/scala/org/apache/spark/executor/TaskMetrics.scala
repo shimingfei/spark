@@ -131,6 +131,7 @@ class TaskMetrics private[spark] () extends Serializable {
   private[spark] def setExecutorRunTime(v: Long): Unit = _executorRunTime.setValue(v)
   private[spark] def incExecutorRunTime(v: Long): Unit = _executorRunTime.add(v)
   private[spark] def setExecutorCpuTime(v: Long): Unit = _executorCpuTime.setValue(v)
+  private[spark] def incExecutorCpuTime(v: Long): Unit = _executorCpuTime.add(v)
   private[spark] def setResultSize(v: Long): Unit = _resultSize.setValue(v)
   private[spark] def setJvmGCTime(v: Long): Unit = _jvmGCTime.setValue(v)
   private[spark] def incJvmGCTime(v: Long): Unit = _jvmGCTime.add(v)

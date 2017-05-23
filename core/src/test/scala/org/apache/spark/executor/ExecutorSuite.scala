@@ -43,9 +43,8 @@ import org.apache.spark.rpc.RpcEnv
 import org.apache.spark.scheduler.{FakeTask, ResultTask, TaskDescription}
 import org.apache.spark.serializer.JavaSerializer
 import org.apache.spark.shuffle.FetchFailedException
-import org.apache.spark.storage.{BlockManager, BlockManagerId}
+import org.apache.spark.storage.BlockManagerId
 import org.apache.spark.util.UninterruptibleThread
-import org.apache.spark.storage.BlockManager
 
 class ExecutorSuite extends SparkFunSuite with LocalSparkContext with MockitoSugar with Eventually {
 
@@ -69,7 +68,8 @@ class ExecutorSuite extends SparkFunSuite with LocalSparkContext with MockitoSug
     // | executor.killAllTasks(true) |                                       |
     // |                             |          ...                          |
     // |                             |  task = ser.deserialize               |
-    // |                             |          ...                          | // |                             | execBackend.statusUpdate  // 2nd time |
+    // |                             |          ...                          |
+    // |                             | execBackend.statusUpdate  // 2nd time |
     // |                             |          ...                          |
     // |                             |   TaskRunner.run() ends               |
     // |       check results         |                                       |
