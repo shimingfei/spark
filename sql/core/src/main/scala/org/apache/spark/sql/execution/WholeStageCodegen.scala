@@ -435,6 +435,7 @@ rang/sum codegen=true                     543 /  675        965.7           1.0 
     case LongType => "long"
     case FloatType => "float"
     case DoubleType => "double"
+    case DateType => "int"
     case t => throw new NvlGeneratorException(t.getClass.toString)
   }
 
@@ -443,6 +444,7 @@ rang/sum codegen=true                     543 /  675        965.7           1.0 
     case LongType => "0L"
     case FloatType => "0.0"
     case DoubleType => "0.0"
+    case DateType => "0"
     case t => throw new NvlGeneratorException(t.getClass.toString)
   }
 

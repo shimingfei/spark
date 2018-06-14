@@ -35,12 +35,13 @@ object WeldTest {
     val start = System.currentTimeMillis()
     val input = sqlContext.read.parquet("/Users/shimingfei/IntellijProjects/temp/lineitem")
       .persist(StorageLevel.DISK_ONLY)
-//    println(s"input size: ${input.count()}")
+    println(s"input size: ${input.count()}")
     input.registerTempTable("lineitem")
 
+    val phase1 = System.currentTimeMillis()
     sqlContext.sql(tpch_q6).foreach(_=>Unit)
     val end = System.currentTimeMillis()
-    println(s"execution cost: ${end - start}")
+    println(s"execution cost: phase0: ${phase1 - start} phase1: ${end - phase1}")
     Thread.sleep(1000 * 1000)
   }
 
